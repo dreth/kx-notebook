@@ -47,6 +47,8 @@ jobs:
           raise SystemExit(0 if os.environ['RELEASE_TAG'] == expected else
           f'release tag {os.environ[\"RELEASE_TAG\"]!r} does not match {expected!r}')"
       - run: uv sync --group dev --locked
+      - name: Test package before release
+        run: uv run pytest
       - run: uv build
       - run: uv run twine check --strict dist/*
       - name: Publish with trusted publishing

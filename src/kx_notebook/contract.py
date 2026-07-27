@@ -13,7 +13,7 @@ import decimal
 import itertools
 import json
 import math
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence, Sized
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -394,7 +394,7 @@ def _table_rows(
 
     if isinstance(value, (str, bytes, bytearray)) or not isinstance(value, Iterable):
         raise TableShapeError("table value must be an iterable of rows")
-    available = _row_count(len(value)) if hasattr(value, "__len__") else total
+    available = _row_count(len(value)) if isinstance(value, Sized) else total
     iterator = iter(value)
     try:
         first = next(iterator)

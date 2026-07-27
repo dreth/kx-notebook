@@ -86,4 +86,6 @@ impact. Generated environments, caches, distributions, credentials, and
 
 Maintainers publish from a GitHub release whose `vX.Y.Z` tag exactly matches
 `pyproject.toml`. The `pypi` environment uses OIDC trusted publishing; no PyPI
-API token belongs in repository secrets or workflow files.
+API token belongs in repository secrets or workflow files. Follow the
+[release guide](docs/releasing.md) for the exact one-time publisher fields and
+release checks.

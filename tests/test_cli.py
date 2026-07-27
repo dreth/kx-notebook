@@ -38,6 +38,28 @@ def hook_files(tmp_path: Path) -> list[Path]:
     return sorted((tmp_path / "ipython").glob("profile_default/startup/*.py"))
 
 
+def test_package_import_is_lightweight() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys, kx_notebook; "
+                "assert 'IPython' not in sys.modules; "
+                "assert 'kx_notebook.magic' not in sys.modules; "
+                "from kx_notebook import DirectQEvaluator; "
+                "assert DirectQEvaluator.__name__ == 'DirectQEvaluator'"
+            ),
+        ],
+        cwd=REPOSITORY,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_startup_hook_install_status_uninstall_is_scoped_and_idempotent(
     tmp_path: Path,
 ) -> None:
