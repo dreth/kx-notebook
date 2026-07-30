@@ -13,6 +13,10 @@ from kx_notebook.contract import (
     QText,
     build_mime_bundle,
 )
+from kx_notebook.defaults import (
+    DEFAULT_CONNECT_TIMEOUT_SECONDS,
+    DEFAULT_QUERY_TIMEOUT_SECONDS,
+)
 from kx_notebook.evaluators import (
     CallbackEvaluator,
     DirectQEvaluator,
@@ -86,6 +90,16 @@ def test_evaluation_context_validates_limits_before_evaluation() -> None:
     ):
         with pytest.raises((TypeError, ValueError)):
             callback.evaluate("1b", EvaluationContext(**kwargs))  # type: ignore[arg-type]
+
+
+def test_direct_evaluator_exposes_shared_timeout_defaults_and_preserves_overrides() -> None:
+    default = DirectQEvaluator("localhost", 5000)
+    explicit = DirectQEvaluator("localhost", 5000, connect_timeout=2.0, query_timeout=30.0)
+
+    assert default.connect_timeout == DEFAULT_CONNECT_TIMEOUT_SECONDS == 5.0
+    assert default.query_timeout == DEFAULT_QUERY_TIMEOUT_SECONDS == 1800.0
+    assert explicit.connect_timeout == 2.0
+    assert explicit.query_timeout == 30.0
 
 
 def test_direct_evaluator_bounds_a_table_preview_and_retains_total_count() -> None:

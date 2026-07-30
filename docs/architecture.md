@@ -33,6 +33,12 @@ The broker adapter is deliberately client-only in 0.1.0. It neither starts nor
 discovers `vscode-kdb`. A profile may name the loopback URL and token environment
 variable, but never contains the token itself.
 
+Direct q IPC and broker HTTP share a default query/execution timeout of `1800.0`
+seconds (30 minutes), matching KX for VS Code's `1,800,000`-millisecond default.
+Direct IPC's separate connection timeout remains `5.0` seconds. All standalone
+configuration and API timeout values use seconds; explicit values are retained.
+Callback and PyKX evaluators do not own this timeout.
+
 ### Broker HTTP v1
 
 The evaluator sends one `POST` to `{base_url}/v1/evaluate` with
@@ -43,15 +49,17 @@ The evaluator sends one `POST` to `{base_url}/v1/evaluate` with
   "version": 1,
   "source": "select from trade",
   "limits": {"rows": 20, "bytes": 1000000},
-  "timeoutSeconds": 30.0
+  "timeoutSeconds": 1800.0
 }
 ```
 
-`timeoutSeconds` is omitted when the caller sets no query timeout. A table
-response has `version: 1`, `kind: "table"`, unique string `columns`, rectangular
-`rows`, a truthful `rowCount`, and an optional `label`. A text response has
-`version: 1`, `kind: "qText"`, string `text`, and optional boolean `truncated`.
-Unknown fields do not relax validation.
+`timeoutSeconds` is sent only for an explicit per-cell timeout. When it is
+omitted, the broker evaluator's local HTTP deadline comes from its profile or
+constructor and defaults to 1800 seconds. A table response has `version: 1`,
+`kind: "table"`, unique string `columns`, rectangular `rows`, a truthful
+`rowCount`, and an optional `label`. A text response has `version: 1`, kind
+`qText`, string `text`, and optional boolean `truncated`. Unknown fields do not
+relax validation.
 
 Both HTTP and HTTPS broker URLs are restricted to loopback. URLs containing
 user information and all redirects are rejected, so the bearer token is not
@@ -69,8 +77,9 @@ safe textual representation exists; otherwise evaluation fails explicitly.
 The request path is synchronous. Closing on timeout/cancel stops local I/O but
 does not assert server-side cancellation. TLS is not part of the 0.1.0
 transport. Response I/O, decompression, and decoding share one query deadline.
-The operating system may not make an in-progress DNS lookup/TCP connect call
-immediately interruptible.
+The query deadline defaults to 1800 seconds; the separate connection deadline
+defaults to 5 seconds. The operating system may not make an in-progress DNS
+lookup/TCP connect call immediately interruptible.
 
 Complete cells use the legacy-compatible `vscode-kdb` semantics: physical q
 lines are grouped client-side and reduced through `value` while restoring the

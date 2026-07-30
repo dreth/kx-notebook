@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 No changes yet.
 
+## [0.1.3] - 2026-07-30
+
+### Changed
+
+- Align Direct q IPC, one-off `%kx connect`, direct profiles, and broker HTTP
+  query/execution defaults at 1800 seconds (30 minutes), matching KX for VS
+  Code's 1,800,000-millisecond default while retaining the 5-second connection
+  timeout and all explicit overrides.
+
 ## [0.1.2] - 2026-07-30
 
 ### Security
@@ -47,7 +56,8 @@ No changes yet.
   that skip when q is unavailable.
 - Python-version CI and a release-only PyPI trusted-publishing workflow.
 
-[Unreleased]: https://github.com/dreth/kx-notebook/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/dreth/kx-notebook/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/dreth/kx-notebook/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/dreth/kx-notebook/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/dreth/kx-notebook/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/dreth/kx-notebook/releases/tag/v0.1.0

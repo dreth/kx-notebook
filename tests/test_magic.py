@@ -16,6 +16,10 @@ from kx_notebook import (
 )
 from kx_notebook.config import Config, Profile, save_config
 from kx_notebook.contract import canonical_payload_bytes
+from kx_notebook.defaults import (
+    DEFAULT_CONNECT_TIMEOUT_SECONDS,
+    DEFAULT_QUERY_TIMEOUT_SECONDS,
+)
 from kx_notebook.evaluators import DirectQEvaluator, EvaluatorError
 from kx_notebook.ipc import QConnection
 from kx_notebook.magic import (
@@ -235,6 +239,23 @@ def test_kx_help_status_profiles_and_disconnect_are_safe_without_connection() ->
     assert "connect" in text
     assert "status" in text
     assert "disconnected" in text or "not connected" in text
+
+
+def test_kx_connect_uses_shared_timeout_defaults_when_omitted() -> None:
+    with mock.patch("kx_notebook.magic.DirectQEvaluator") as evaluator_type:
+        evaluator_type.return_value.endpoint = "localhost:5000"
+
+        KxQMagics(shell=None).kx("connect localhost:5000")
+
+    evaluator_type.assert_called_once_with(
+        "localhost",
+        5000,
+        username="",
+        password=None,
+        connect_timeout=DEFAULT_CONNECT_TIMEOUT_SECONDS,
+        query_timeout=DEFAULT_QUERY_TIMEOUT_SECONDS,
+    )
+    evaluator_type.return_value.connect.assert_called_once_with()
 
 
 @pytest.mark.integration

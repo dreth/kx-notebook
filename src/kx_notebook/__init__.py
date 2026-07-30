@@ -9,7 +9,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 _EXPORTS: dict[str, tuple[str, str]] = {
     "Config": (".config", "Config"),
@@ -22,6 +22,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "CONTRACT_VERSION": (".contract", "CONTRACT_VERSION"),
     "DEFAULT_BYTE_LIMIT": (".contract", "DEFAULT_BYTE_LIMIT"),
     "DEFAULT_ROW_LIMIT": (".contract", "DEFAULT_ROW_LIMIT"),
+    "DEFAULT_CONNECT_TIMEOUT_SECONDS": (".defaults", "DEFAULT_CONNECT_TIMEOUT_SECONDS"),
+    "DEFAULT_QUERY_TIMEOUT_SECONDS": (".defaults", "DEFAULT_QUERY_TIMEOUT_SECONDS"),
     "MIME_TYPE": (".contract", "MIME_TYPE"),
     "Chart": (".contract", "Chart"),
     "EvaluationResult": (".contract", "EvaluationResult"),

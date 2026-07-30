@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from kx_notebook.contract import EvaluationResult, QText
+from kx_notebook.defaults import DEFAULT_QUERY_TIMEOUT_SECONDS
 from kx_notebook.evaluators import BrokerEvaluator, EvaluationContext
 
 
@@ -168,6 +169,14 @@ def test_broker_applies_default_context_when_none_is_supplied() -> None:
         "source": "6*7",
         "limits": {"rows": 20, "bytes": 1_000_000},
     }
+
+
+def test_broker_uses_shared_http_timeout_default_and_preserves_override() -> None:
+    default = BrokerEvaluator("http://127.0.0.1:5000", "fixture-token")
+    explicit = BrokerEvaluator("http://127.0.0.1:5000", "fixture-token", timeout=30.0)
+
+    assert default.timeout == DEFAULT_QUERY_TIMEOUT_SECONDS == 1800.0
+    assert explicit.timeout == 30.0
 
 
 @pytest.mark.parametrize(

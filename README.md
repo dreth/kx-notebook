@@ -9,7 +9,7 @@ contract already consumed by
 has escaped `text/html` and `text/plain` fallbacks, so saved notebooks remain
 readable without a custom renderer.
 
-This is the source for version 0.1.2. The installation below intentionally uses
+This is the source for version 0.1.3. The installation below intentionally uses
 a source checkout; do not assume PyPI availability until a release is
 published.
 
@@ -115,6 +115,13 @@ a time; requests are not multiplexed. The timeout covers response I/O,
 decompression, and cooperative decoding. An operating-system DNS lookup or TCP
 connect call cannot always be interrupted immediately by another thread.
 
+The default standalone query/execution timeout is `1800.0` seconds (30 minutes)
+for Direct q IPC and broker HTTP. This matches KX for VS Code's
+`1,800,000`-millisecond default without introducing a lower standalone ceiling.
+The connection timeout remains `5.0` seconds. Profile, Python API, `%kx`, and
+`%%q` timeout values are always seconds, and explicit values override these
+defaults. Callback and PyKX execution remain owned by their respective callers.
+
 TLS transport is not implemented in 0.1.0. Use a trusted local/private network
 or a separately managed secure tunnel; do not expose an unauthenticated q port
 to an untrusted network.
@@ -148,7 +155,7 @@ port = 5000
 username = "analyst"
 password_env = "KX_NOTEBOOK_LOCAL_PASSWORD"
 connect_timeout = 5.0
-query_timeout = 30.0
+query_timeout = 1800.0
 max_receive_bytes = 67108864
 ```
 
@@ -166,7 +173,7 @@ written back to the profile file.
 For a one-off direct connection, the equivalent magic is:
 
 ```python
-%kx connect localhost:5000 --username analyst --password-env KX_NOTEBOOK_LOCAL_PASSWORD --connect-timeout 5 --query-timeout 30
+%kx connect localhost:5000 --username analyst --password-env KX_NOTEBOOK_LOCAL_PASSWORD --connect-timeout 5 --query-timeout 1800
 ```
 
 Avoid entering a password directly in a notebook cell: notebook source and
@@ -232,11 +239,12 @@ A broker profile may persist only non-secret lookup metadata:
 kind = "broker"
 base_url = "http://127.0.0.1:8765"
 token_env = "KX_NOTEBOOK_BROKER_TOKEN"
-timeout = 10.0
+timeout = 1800.0
 ```
 
 The bearer token is read from the named environment variable at runtime. The
-package does not bundle or launch a broker.
+package does not bundle or launch a broker. The broker `timeout` is the HTTP
+execution deadline in seconds; it defaults to 1800 seconds when omitted.
 
 See
 [Architecture](https://github.com/dreth/kx-notebook/blob/main/docs/architecture.md)

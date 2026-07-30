@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Optional, Union, overload
 
 from .contract import QText
+from .defaults import DEFAULT_CONNECT_TIMEOUT_SECONDS, DEFAULT_QUERY_TIMEOUT_SECONDS
 
 HEADER_LENGTH = 8
 MESSAGE_SYNC = 1
@@ -555,8 +556,8 @@ class QConnection:
         *,
         username: str = "",
         password: Optional[str] = None,
-        connect_timeout: Optional[float] = 5.0,
-        query_timeout: Optional[float] = 30.0,
+        connect_timeout: Optional[float] = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+        query_timeout: Optional[float] = DEFAULT_QUERY_TIMEOUT_SECONDS,
         max_receive_bytes: int = DEFAULT_MAX_RECEIVE_BYTES,
     ) -> None:
         if (

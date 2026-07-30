@@ -9,6 +9,10 @@ from typing import Any
 
 import pytest
 
+from kx_notebook.defaults import (
+    DEFAULT_CONNECT_TIMEOUT_SECONDS,
+    DEFAULT_QUERY_TIMEOUT_SECONDS,
+)
 from kx_notebook.ipc import (
     DIRECT_Q_ENVELOPE_MARKER,
     QCancelledError,
@@ -107,6 +111,16 @@ def test_connection_options_reject_ambiguous_auth_and_invalid_endpoint(
 ) -> None:
     with pytest.raises((TypeError, ValueError)):
         QConnection(**kwargs)  # type: ignore[arg-type]
+
+
+def test_connection_uses_shared_timeout_defaults_and_preserves_overrides() -> None:
+    default = QConnection("localhost", 5000)
+    explicit = QConnection("localhost", 5000, connect_timeout=2.0, query_timeout=30.0)
+
+    assert default.connect_timeout == DEFAULT_CONNECT_TIMEOUT_SECONDS == 5.0
+    assert default.query_timeout == DEFAULT_QUERY_TIMEOUT_SECONDS == 1800.0
+    assert explicit.connect_timeout == 2.0
+    assert explicit.query_timeout == 30.0
 
 
 @pytest.mark.parametrize(

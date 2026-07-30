@@ -16,6 +16,10 @@ from kx_notebook.config import (
     resolve_password,
     save_config,
 )
+from kx_notebook.defaults import (
+    DEFAULT_CONNECT_TIMEOUT_SECONDS,
+    DEFAULT_QUERY_TIMEOUT_SECONDS,
+)
 
 
 def test_config_round_trip_contains_only_non_secret_profile_metadata(
@@ -48,6 +52,62 @@ def test_config_round_trip_contains_only_non_secret_profile_metadata(
     assert "password =" not in text
     assert "KX_NOTEBOOK_TEST_PASSWORD" in text
     assert resolve_password(loaded.profiles["local"]) == fake_password
+
+
+def test_profile_timeout_defaults_round_trip_without_redundant_fields(tmp_path: Path) -> None:
+    config = Config(
+        profiles={
+            "direct": Profile(name="direct", host="localhost", port=5000),
+            "broker": Profile(
+                name="broker",
+                kind="broker",
+                base_url="http://127.0.0.1:8765",
+            ),
+            "pykx": Profile(name="pykx", kind="pykx"),
+        }
+    )
+    path = tmp_path / "config.toml"
+
+    save_config(config, path)
+    loaded = load_config(path)
+    text = path.read_text(encoding="utf-8")
+
+    assert loaded == config
+    assert loaded.profiles["direct"].connect_timeout == DEFAULT_CONNECT_TIMEOUT_SECONDS == 5.0
+    assert loaded.profiles["direct"].query_timeout == DEFAULT_QUERY_TIMEOUT_SECONDS == 1800.0
+    assert loaded.profiles["broker"].timeout == DEFAULT_QUERY_TIMEOUT_SECONDS
+    assert "connect_timeout =" not in text
+    assert "query_timeout =" not in text
+    assert "\ntimeout =" not in text
+
+
+def test_explicit_nondefault_timeouts_are_serialized_and_preserved(tmp_path: Path) -> None:
+    config = Config(
+        profiles={
+            "direct": Profile(
+                name="direct",
+                host="localhost",
+                port=5000,
+                connect_timeout=7.0,
+                query_timeout=30.0,
+            ),
+            "broker": Profile(
+                name="broker",
+                kind="broker",
+                base_url="http://127.0.0.1:8765",
+                timeout=45.0,
+            ),
+        }
+    )
+    path = tmp_path / "config.toml"
+
+    save_config(config, path)
+    text = path.read_text(encoding="utf-8")
+
+    assert load_config(path) == config
+    assert "connect_timeout = 7" in text
+    assert "query_timeout = 30" in text
+    assert "timeout = 45" in text
 
 
 def test_config_path_uses_xdg_config_home(

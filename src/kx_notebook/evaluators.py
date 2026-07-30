@@ -26,6 +26,7 @@ from .contract import (
     EvaluationResult,
     QText,
 )
+from .defaults import DEFAULT_CONNECT_TIMEOUT_SECONDS, DEFAULT_QUERY_TIMEOUT_SECONDS
 from .ipc import (
     DEFAULT_MAX_RECEIVE_BYTES,
     DIRECT_Q_ENVELOPE_MARKER,
@@ -128,8 +129,8 @@ class DirectQEvaluator:
         *,
         username: str = "",
         password: Optional[str] = None,
-        connect_timeout: Optional[float] = 5.0,
-        query_timeout: Optional[float] = 30.0,
+        connect_timeout: Optional[float] = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+        query_timeout: Optional[float] = DEFAULT_QUERY_TIMEOUT_SECONDS,
         max_receive_bytes: int = DEFAULT_MAX_RECEIVE_BYTES,
         namespace: str = ".",
     ) -> None:
@@ -149,6 +150,14 @@ class DirectQEvaluator:
     @property
     def connected(self) -> bool:
         return self._connection.connected
+
+    @property
+    def connect_timeout(self) -> Optional[float]:
+        return self._connection.connect_timeout
+
+    @property
+    def query_timeout(self) -> Optional[float]:
+        return self._connection.query_timeout
 
     @property
     def endpoint(self) -> str:
@@ -276,7 +285,7 @@ class BrokerEvaluator:
         base_url: str,
         token: str,
         *,
-        timeout: float = 30.0,
+        timeout: float = DEFAULT_QUERY_TIMEOUT_SECONDS,
         max_response_bytes: int = 16 * 1024 * 1024,
     ) -> None:
         self.base_url = _broker_url(base_url)

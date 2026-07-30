@@ -18,6 +18,7 @@ from .contract import (
     EvaluationResult,
     build_mime_bundle,
 )
+from .defaults import DEFAULT_CONNECT_TIMEOUT_SECONDS, DEFAULT_QUERY_TIMEOUT_SECONDS
 from .evaluators import (
     BrokerEvaluator,
     DirectQEvaluator,
@@ -329,8 +330,8 @@ def _connect_arguments(arguments: list[str]) -> DirectQEvaluator:
     endpoint = arguments[0]
     username = ""
     password_env: Optional[str] = None
-    connect_timeout = 5.0
-    query_timeout = 30.0
+    connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
+    query_timeout = DEFAULT_QUERY_TIMEOUT_SECONDS
     seen: set[str] = set()
     index = 1
     supported = {

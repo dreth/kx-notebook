@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Mapping, Optional
 
+from .defaults import DEFAULT_CONNECT_TIMEOUT_SECONDS, DEFAULT_QUERY_TIMEOUT_SECONDS
 from .ipc import DEFAULT_MAX_RECEIVE_BYTES, MAX_RECEIVE_BYTES
 
 if TYPE_CHECKING:
@@ -68,12 +69,12 @@ class Profile:
     port: Optional[int] = None
     username: str = ""
     password_env: Optional[str] = None
-    connect_timeout: float = 5.0
-    query_timeout: float = 30.0
+    connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS
+    query_timeout: float = DEFAULT_QUERY_TIMEOUT_SECONDS
     max_receive_bytes: int = DEFAULT_MAX_RECEIVE_BYTES
     base_url: Optional[str] = None
     token_env: Optional[str] = None
-    timeout: float = 30.0
+    timeout: float = DEFAULT_QUERY_TIMEOUT_SECONDS
 
     def __post_init__(self) -> None:
         _validate_profile(self)
@@ -307,7 +308,7 @@ def _validate_profile(profile: Profile) -> None:
             raise ConfigError("direct profile port must be between 1 and 65535")
         if profile.base_url is not None or profile.token_env is not None:
             raise ConfigError("direct profiles cannot contain broker fields")
-        if profile.timeout != 30.0:
+        if profile.timeout != DEFAULT_QUERY_TIMEOUT_SECONDS:
             raise ConfigError("direct profiles cannot set broker timeout")
     elif profile.kind == "broker":
         if not isinstance(profile.base_url, str) or not profile.base_url:
@@ -324,8 +325,8 @@ def _validate_profile(profile: Profile) -> None:
             or profile.port is not None
             or profile.password_env is not None
             or profile.username
-            or profile.connect_timeout != 5.0
-            or profile.query_timeout != 30.0
+            or profile.connect_timeout != DEFAULT_CONNECT_TIMEOUT_SECONDS
+            or profile.query_timeout != DEFAULT_QUERY_TIMEOUT_SECONDS
             or profile.max_receive_bytes != DEFAULT_MAX_RECEIVE_BYTES
         ):
             raise ConfigError("broker profiles cannot contain direct IPC fields")
@@ -341,10 +342,10 @@ def _validate_profile(profile: Profile) -> None:
             raise ConfigError("pykx profiles cannot contain connection fields")
         if (
             profile.username
-            or profile.connect_timeout != 5.0
-            or profile.query_timeout != 30.0
+            or profile.connect_timeout != DEFAULT_CONNECT_TIMEOUT_SECONDS
+            or profile.query_timeout != DEFAULT_QUERY_TIMEOUT_SECONDS
             or profile.max_receive_bytes != DEFAULT_MAX_RECEIVE_BYTES
-            or profile.timeout != 30.0
+            or profile.timeout != DEFAULT_QUERY_TIMEOUT_SECONDS
         ):
             raise ConfigError("pykx profiles cannot contain connection timeouts")
     if (
@@ -380,9 +381,9 @@ def _toml(config: Config) -> str:
                 lines.append(f"username = {_toml_string(profile.username)}")
             if profile.password_env:
                 lines.append(f"password_env = {_toml_string(profile.password_env)}")
-            if profile.connect_timeout != 5.0:
+            if profile.connect_timeout != DEFAULT_CONNECT_TIMEOUT_SECONDS:
                 lines.append(f"connect_timeout = {profile.connect_timeout:g}")
-            if profile.query_timeout != 30.0:
+            if profile.query_timeout != DEFAULT_QUERY_TIMEOUT_SECONDS:
                 lines.append(f"query_timeout = {profile.query_timeout:g}")
             if profile.max_receive_bytes != DEFAULT_MAX_RECEIVE_BYTES:
                 lines.append(f"max_receive_bytes = {profile.max_receive_bytes}")
@@ -390,7 +391,7 @@ def _toml(config: Config) -> str:
             lines.append(f"base_url = {_toml_string(profile.base_url or '')}")
             if profile.token_env:
                 lines.append(f"token_env = {_toml_string(profile.token_env)}")
-            if profile.timeout != 30.0:
+            if profile.timeout != DEFAULT_QUERY_TIMEOUT_SECONDS:
                 lines.append(f"timeout = {profile.timeout:g}")
     return "\n".join(lines) + "\n"
 
