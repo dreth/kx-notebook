@@ -28,10 +28,15 @@ from .contract import (
 )
 from .ipc import (
     DEFAULT_MAX_RECEIVE_BYTES,
+    DIRECT_Q_ENVELOPE_MARKER,
+    DIRECT_Q_MAX_PREVIEW_CELLS,
+    QCharVector,
     QConnection,
     QDictionary,
     QKeyedTable,
+    QSymbol,
     QTable,
+    QVector,
     q_script_query,
     q_text,
     redact_q_value,
@@ -165,29 +170,61 @@ class DirectQEvaluator:
         if not self.connected:
             self.connect()
         value = self._connection.query(
-            q_script_query(source, self.namespace), timeout=context.timeout
+            q_script_query(
+                source,
+                self.namespace,
+                row_limit=context.row_limit,
+                max_receive_bytes=self._connection.max_receive_bytes,
+            ),
+            timeout=context.timeout,
+            _envelope_marker=DIRECT_Q_ENVELOPE_MARKER.encode("ascii"),
         )
+        transport = _direct_q_result(
+            value,
+            context.row_limit,
+            self._connection.redact_value,
+        )
+        # Never retain an unredacted decoded envelope in a frame that can raise.
+        value = None
+        if transport is None:
+            raise EvaluatorError("invalid Direct q result envelope")
+        if transport.omission is not None:
+            explanation = (
+                "columns exceed the portable schema limit and were omitted safely"
+                if transport.omission == "columns"
+                else "bounded preview exceeds the direct IPC wire limit and was omitted safely"
+            )
+            truncation_reason = (
+                "columnLimit" if transport.omission == "columns" else "sourcePreview"
+            )
+            return EvaluationResult(
+                QText(
+                    f"[table {transport.row_count}x{transport.column_count}; {explanation}]",
+                    truncated=True,
+                    truncation_reasons=(truncation_reason,),
+                ),
+                label=f"Direct q IPC · {self.endpoint}",
+            )
+        value = transport.value
         if isinstance(value, (QTable, QKeyedTable)):
+            if transport.row_count is None:
+                raise EvaluatorError("invalid Direct q result envelope")
             if len(value.columns) > MAX_COLUMNS or any(
                 not column or len(column) > 256 for column in value.columns
             ):
                 return EvaluationResult(
                     QText(
-                        f"[table {value.row_count}x{len(value.columns)}; "
+                        f"[table {transport.row_count}x{len(value.columns)}; "
                         "columns exceed the portable schema limit and were omitted safely]",
                         truncated=True,
                         truncation_reasons=("columnLimit",),
                     ),
                     label=f"Direct q IPC · {self.endpoint}",
                 )
-            preview_count = min(value.row_count, context.row_limit)
-            safe_value = self._connection.redact_value(_q_table_preview(value, preview_count))
-            if not isinstance(safe_value, (QTable, QKeyedTable)):
-                raise EvaluatorError("direct q table redaction changed the result shape")
-            if any(not column or len(column) > 256 for column in safe_value.columns):
+            if any(not column or len(column) > 256 for column in value.columns):
                 return EvaluationResult(
                     QText(
-                        f"[table {value.row_count}x{len(value.columns)}; "
+                        f"[table {transport.row_count}x{len(value.columns)}; "
                         "redacted column names exceed the portable schema limit "
                         "and were omitted safely]",
                         truncated=True,
@@ -196,9 +233,9 @@ class DirectQEvaluator:
                     label=f"Direct q IPC · {self.endpoint}",
                 )
             return EvaluationResult(
-                safe_value.rows,
-                columns=list(safe_value.columns),
-                row_count=value.row_count,
+                value.rows,
+                columns=list(value.columns),
+                row_count=transport.row_count,
                 label=f"Direct q IPC · {self.endpoint}",
             )
         if isinstance(value, QText):
@@ -206,7 +243,7 @@ class DirectQEvaluator:
         else:
             text = q_text(value)
         return EvaluationResult(
-            self._connection.redact_value(text),
+            text,
             label=f"Direct q IPC · {self.endpoint}",
         )
 
@@ -506,17 +543,103 @@ def as_evaluator(value: EvaluatorLike) -> Evaluator:
     raise TypeError("evaluator must implement evaluate() or be callable")
 
 
-def _q_table_preview(value: Union[QTable, QKeyedTable], count: int) -> Union[QTable, QKeyedTable]:
-    def preview(table: QTable) -> QTable:
-        return QTable(
-            list(table.columns),
-            [column[:count] for column in table.column_data],
-            count,
-        )
+@dataclass(frozen=True)
+class _DirectQResult:
+    value: Any
+    row_count: Optional[int]
+    column_count: Optional[int] = None
+    omission: Optional[str] = None
 
-    if isinstance(value, QKeyedTable):
-        return QKeyedTable(preview(value.key_table), preview(value.value_table))
-    return preview(value)
+
+def _direct_q_result(
+    value: Any,
+    row_limit: int,
+    redact_value: Callable[[Any], Any],
+) -> Optional[_DirectQResult]:
+    """Validate, unwrap, and redact without leaking rejected payload locals."""
+
+    try:
+        result = _parse_direct_q_result(value, row_limit)
+        safe_value = redact_value(result.value)
+        return _DirectQResult(
+            safe_value,
+            result.row_count,
+            column_count=result.column_count,
+            omission=result.omission,
+        )
+    except Exception as error:
+        # Validation is fail-closed. Clear any validator traceback that retained
+        # the hostile decoded envelope, then return without propagating context.
+        error.__traceback__ = None
+        return None
+
+
+def _parse_direct_q_result(value: Any, row_limit: int) -> _DirectQResult:
+    """Strictly validate and unwrap one private DirectQEvaluator envelope."""
+
+    if not isinstance(value, QVector) or value.ipc_type != 0 or len(value) != 4:
+        raise EvaluatorError("invalid Direct q result envelope")
+    marker, kind, total, payload = value
+    if (
+        not isinstance(marker, QCharVector)
+        or marker.raw != DIRECT_Q_ENVELOPE_MARKER.encode("ascii")
+        or not isinstance(kind, QSymbol)
+    ):
+        raise EvaluatorError("invalid Direct q result envelope")
+    kind_text = kind.text()
+    if kind_text == "value":
+        if total is not None or isinstance(payload, (QTable, QKeyedTable)):
+            raise EvaluatorError("invalid Direct q result envelope")
+        return _DirectQResult(payload, None)
+    if kind_text in {"tableColumns", "tableBytes"}:
+        checked_total = _direct_q_total(total)
+        if (
+            isinstance(payload, bool)
+            or not isinstance(payload, int)
+            or payload < 0
+            or (kind_text == "tableColumns" and payload <= MAX_COLUMNS)
+            or (kind_text == "tableBytes" and payload > MAX_COLUMNS)
+        ):
+            raise EvaluatorError("invalid Direct q result envelope")
+        return _DirectQResult(
+            payload,
+            checked_total,
+            column_count=payload,
+            omission="columns" if kind_text == "tableColumns" else "bytes",
+        )
+    expected_type: type[Union[QTable, QKeyedTable]]
+    capped = kind_text in {"tableSafe", "keyedTableSafe"}
+    if kind_text in {"table", "tableSafe"}:
+        expected_type = QTable
+    elif kind_text in {"keyedTable", "keyedTableSafe"}:
+        expected_type = QKeyedTable
+    else:
+        raise EvaluatorError("invalid Direct q result envelope")
+    if isinstance(payload, QText):
+        _direct_q_total(total)
+        return _DirectQResult(payload, None)
+    if type(payload) is not expected_type:
+        raise EvaluatorError("invalid Direct q result envelope")
+    checked_total = _direct_q_total(total)
+    preview_count = payload.row_count
+    max_cells = DIRECT_Q_MAX_PREVIEW_CELLS // max(1, len(payload.columns))
+    target_count = min(checked_total, row_limit)
+    if (
+        preview_count > checked_total
+        or preview_count > row_limit
+        or preview_count > max_cells
+        or (checked_total == 0) != (preview_count == 0)
+        or (not capped and preview_count != target_count)
+        or (capped and not 0 < preview_count < target_count)
+    ):
+        raise EvaluatorError("invalid Direct q result envelope")
+    return _DirectQResult(payload, checked_total)
+
+
+def _direct_q_total(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= JS_SAFE_INTEGER:
+        raise EvaluatorError("invalid Direct q result envelope")
+    return int(value)
 
 
 def _pykx_table_preview(original: Any, converted: Any) -> bool:

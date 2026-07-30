@@ -11,8 +11,17 @@ from pathlib import Path
 import pytest
 
 from kx_notebook import MIME_TYPE, build_mime_bundle
+from kx_notebook.contract import QText
 from kx_notebook.evaluators import DirectQEvaluator, EvaluationContext
-from kx_notebook.ipc import QConnection, QError, QTable, QTimeoutError
+from kx_notebook.ipc import (
+    DEFAULT_MAX_ITEMS,
+    DEFAULT_MAX_RECEIVE_BYTES,
+    QCharVector,
+    QConnection,
+    QError,
+    QTable,
+    QTimeoutError,
+)
 
 
 def _q_executable() -> Path | None:
@@ -126,18 +135,37 @@ def test_live_q_scalar_list_table_error_timeout_and_reconnect(
 
 @pytest.mark.live_q
 @pytest.mark.integration
-def test_live_q_direct_evaluator_retains_total_count_for_bounded_preview(
+def test_live_q_direct_evaluator_bounds_500k_by_40_table_on_the_wire(
     live_q: tuple[str, int],
 ) -> None:
     host, port = live_q
-    evaluator = DirectQEvaluator(host, port)
+    rows = 500_000
+    columns = 40
+    assert rows * columns > DEFAULT_MAX_ITEMS
+    assert rows * columns * 4 > DEFAULT_MAX_RECEIVE_BYTES
+
+    evaluator = DirectQEvaluator(
+        host,
+        port,
+        max_receive_bytes=4_096,
+        query_timeout=20,
+    )
     try:
         result = evaluator.evaluate(
-            "([] id:til 100;sym:100#`AAPL)\n",
+            'wireRuns:0\nwireRuns+:1\nflip (`$("c",/:string til 40))!40#enlist til 500000\n',
             EvaluationContext(row_limit=3, byte_limit=20_000),
         )
+        state = evaluator.evaluate("wireRuns")
     finally:
         evaluator.close()
+
+    assert result.row_count == rows
+    assert result.columns == [f"c{index}" for index in range(columns)]
+    assert len(result.value) == 3
+    assert list(result.value)[0] == {f"c{index}": 0 for index in range(columns)}
+    assert list(result.value)[2] == {f"c{index}": 2 for index in range(columns)}
+    assert isinstance(state.value, QText)
+    assert state.value.text == "1"
 
     output = build_mime_bundle(
         result.value,
@@ -147,6 +175,38 @@ def test_live_q_direct_evaluator_retains_total_count_for_bounded_preview(
         byte_limit=20_000,
     )
     payload = output.bundle[MIME_TYPE]
-    assert payload["result"]["rowCount"] == 100
+    assert payload["result"]["rowCount"] == rows
     assert payload["result"]["previewRowCount"] == 3
     assert payload["result"]["truncated"] is True
+    assert len(payload["data"]["rows"]) == 3
+
+
+@pytest.mark.live_q
+@pytest.mark.integration
+def test_live_q_direct_envelope_preserves_namespace_state_and_errors(
+    live_q: tuple[str, int],
+) -> None:
+    host, port = live_q
+    evaluator = DirectQEvaluator(host, port, namespace=".analytics")
+    try:
+        result = evaluator.evaluate(
+            "counter:0\ncounter+:1\n([]id:til 5)",
+            EvaluationContext(row_limit=2, byte_limit=20_000),
+        )
+        state = evaluator.evaluate("counter")
+        with pytest.raises(QError, match="boom"):
+            evaluator.evaluate("counter+:1\n'`boom")
+        state_after_error = evaluator.evaluate("counter")
+    finally:
+        evaluator.close()
+
+    assert result.row_count == 5
+    assert list(result.value) == [{"id": 0}, {"id": 1}]
+    assert isinstance(state.value, QText)
+    assert state.value.text == "1"
+    assert isinstance(state_after_error.value, QText)
+    assert state_after_error.value.text == "2"
+    with QConnection(host, port, query_timeout=2) as connection:
+        namespace = connection.query('string system"d"')
+    assert isinstance(namespace, QCharVector)
+    assert namespace.text() == "."

@@ -27,6 +27,7 @@ from kx_notebook.magic import (
 from .qipc_fixtures import (
     Exchange,
     ScriptedQServer,
+    q_direct_result,
     q_float_vector,
     q_message,
     q_symbol_vector,
@@ -239,11 +240,15 @@ def test_kx_help_status_profiles_and_disconnect_are_safe_without_connection() ->
 @pytest.mark.integration
 def test_real_ipython_kx_connect_q_and_disconnect_lifecycle() -> None:
     response = q_message(
-        q_table(
-            {
-                "sym": q_symbol_vector(["AAPL"]),
-                "price": q_float_vector([224.1]),
-            }
+        q_direct_result(
+            q_table(
+                {
+                    "sym": q_symbol_vector(["AAPL"]),
+                    "price": q_float_vector([224.1]),
+                }
+            ),
+            kind="table",
+            row_count=1,
         )
     )
     shell = InteractiveShell.instance()
@@ -273,11 +278,15 @@ def test_real_ipython_kx_connect_q_and_disconnect_lifecycle() -> None:
 def test_direct_magic_wires_the_final_serialized_credential_gate() -> None:
     secret = "a\tb"
     response = q_message(
-        q_table(
-            {
-                "x": q_symbol_vector(["a"]),
-                "y": q_symbol_vector(["b"]),
-            }
+        q_direct_result(
+            q_table(
+                {
+                    "x": q_symbol_vector(["a"]),
+                    "y": q_symbol_vector(["b"]),
+                }
+            ),
+            kind="table",
+            row_count=1,
         )
     )
     with ScriptedQServer([Exchange(response)]) as server:
@@ -303,11 +312,15 @@ def test_kx_profiles_and_use_resolve_runtime_password_without_printing_it(
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.setenv("KX_NOTEBOOK_TEST_PASSWORD", fake_password)
     response = q_message(
-        q_table(
-            {
-                "sym": q_symbol_vector(["AAPL"]),
-                "price": q_float_vector([224.1]),
-            }
+        q_direct_result(
+            q_table(
+                {
+                    "sym": q_symbol_vector(["AAPL"]),
+                    "price": q_float_vector([224.1]),
+                }
+            ),
+            kind="table",
+            row_count=1,
         )
     )
     with ScriptedQServer([Exchange(response)]) as server:

@@ -9,6 +9,8 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+DIRECT_Q_ENVELOPE_MARKER = "kx-notebook/direct-q/v1"
+
 
 def q_message(payload: bytes, *, message_type: int = 2, little_endian: bool = True) -> bytes:
     byte_order = "<" if little_endian else ">"
@@ -140,6 +142,20 @@ def q_keyed_table(
     value_columns: Mapping[str, bytes],
 ) -> bytes:
     return q_dictionary(q_table(key_columns), q_table(value_columns))
+
+
+def q_direct_result(value: bytes, *, kind: str, row_count: int | None = None) -> bytes:
+    """Encode the private DirectQEvaluator response envelope."""
+
+    encoded_count = q_long(-9_223_372_036_854_775_808 if row_count is None else row_count)
+    return q_general_list(
+        [
+            q_string(DIRECT_Q_ENVELOPE_MARKER),
+            q_symbol(kind),
+            encoded_count,
+            value,
+        ]
+    )
 
 
 def request_source(message: bytes) -> str:

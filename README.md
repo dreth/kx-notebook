@@ -9,7 +9,7 @@ contract already consumed by
 has escaped `text/html` and `text/plain` fallbacks, so saved notebooks remain
 readable without a custom renderer.
 
-This is the source for version 0.1.0. The installation below intentionally uses
+This is the source for version 0.1.1. The installation below intentionally uses
 a source checkout; do not assume PyPI availability until a release is
 published.
 
@@ -98,6 +98,15 @@ unkeyed tables, temporal values, symbols, strings, and nulls, and surfaces q
 errors normally. Values outside the supported decoder are represented as
 bounded q text when a safe representation is available; the package does not
 invent a Python value.
+
+`DirectQEvaluator` executes each complete q cell exactly once in the selected
+namespace. If that result is a keyed or unkeyed table, q returns only a bounded
+row preview plus the true total row count; the full table is not transported to
+Python first. The wire preview is also kept below the configured receive limit
+and an item-safe internal budget. A schema or row that cannot fit is represented
+by an explicit omission instead of triggering the IPC item/receive limits.
+Scalar and other non-table results retain their existing behavior after the
+private response envelope is validated and removed.
 
 Timeout or local cancellation closes the client socket. That stops waiting in
 the notebook, but it cannot guarantee that an already-running server-side q
@@ -256,8 +265,10 @@ environment.
 Contract version 1 persists either a table preview or bounded `qText`.
 Table output records the declared total row count, persisted preview row count,
 row/byte limits, and truncation reasons. A preview is never described as the
-full result. Cell values use explicit portable kinds including temporal,
-bigint, null, and JSON; symbols are losslessly displayed as string cells.
+full result. For direct IPC tables, `rowCount` is q's true total while
+`previewRowCount` describes only the rows bounded on the q server and sent over
+the wire. Cell values use explicit portable kinds including temporal, bigint,
+null, and JSON; symbols are losslessly displayed as string cells.
 
 The package emits:
 

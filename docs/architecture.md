@@ -77,6 +77,29 @@ lines are grouped client-side and reduced through `value` while restoring the
 previous namespace. The evaluator does not depend on `.Q.ld`, so it remains
 usable with older q installations where that helper is absent.
 
+The direct evaluator composes that complete-cell expression exactly once as the
+argument to a server-side transport wrapper. The wrapper classifies the single
+result, leaves non-tables unchanged, and applies `count` plus a bounded take to
+keyed and unkeyed tables. It returns a four-field private envelope containing a
+fixed marker, result kind, true table row count (or null for non-tables), and
+the bounded value. Because every successful result is wrapped and the nested
+payload is never recursively interpreted, user data that resembles the
+envelope cannot collide with the protocol.
+
+Envelope shape, marker bytes, field types, result kind, total count, keyedness,
+preview count, row limit, and internal cell budget are validated before
+redaction or display. The q wrapper also measures its serialized table envelope
+and shrinks it below both the configured receive limit and an item-safe internal
+wire budget. Over-wide schemas or previews that cannot fit even one row become
+explicit bounded omissions. The decoder retains its established opaque-value
+fallback inside an otherwise valid envelope.
+
+Native q errors occur before envelope construction and retain the existing
+restore-and-rethrow behavior. Assignments and other state changes therefore
+occur once and persist exactly as before, including changes made before an
+error. Redaction still happens after transport validation, and timeouts,
+interrupts, and cancellation still close the same single synchronous request.
+
 ## Portable result contract
 
 The MIME type is `application/vnd.kx.result+json`; version 1 matches the

@@ -38,6 +38,9 @@ DEFAULT_MAX_ITEMS = 2_000_000
 DEFAULT_MAX_DEPTH = 128
 MAX_Q_ERROR_CHARS = 4_096
 MAX_Q_SYMBOL_BYTES = 1_048_576
+DIRECT_Q_ENVELOPE_MARKER = "kx-notebook/direct-q/v1"
+DIRECT_Q_MAX_PREVIEW_CELLS = 1_000_000
+DIRECT_Q_MAX_WIRE_BYTES = 1_000_000
 
 
 class QIpcError(RuntimeError):
@@ -331,6 +334,7 @@ def deserialize_message(
     max_depth: int = DEFAULT_MAX_DEPTH,
     redactions: Sequence[str] = (),
     deadline: Optional[float] = None,
+    envelope_marker: Optional[bytes] = None,
 ) -> QValue:
     """Decode one complete q IPC response.
 
@@ -378,10 +382,12 @@ def deserialize_message(
         deadline=deadline,
     )
     try:
-        value = reader.read_payload()
+        value = reader.read_payload(envelope_marker=envelope_marker)
         _check_deadline(deadline)
         return value
     except UnsupportedQType as error:
+        if envelope_marker is not None:
+            raise QIpcError("invalid q IPC result envelope") from None
         omitted = len(normalized) - HEADER_LENGTH
         return QText(
             f"[unsupported q IPC type {error.q_type}; {omitted} payload bytes omitted safely]",
@@ -453,13 +459,31 @@ def q_script_groups(script: str) -> list[str]:
     return groups
 
 
-def q_script_query(script: str, namespace: str = ".") -> str:
-    """Build the legacy-compatible complete-cell ``value`` reduction."""
+def q_script_query(
+    script: str,
+    namespace: str = ".",
+    *,
+    row_limit: Optional[int] = None,
+    max_receive_bytes: int = DEFAULT_MAX_RECEIVE_BYTES,
+) -> str:
+    """Build the legacy-compatible complete-cell ``value`` reduction.
+
+    When ``row_limit`` is supplied, the result is wrapped once in the private
+    DirectQEvaluator envelope. Tables are counted and bounded in q before IPC
+    serialization; other values are carried unchanged inside the envelope.
+    """
 
     if namespace != "." and not re.fullmatch(
         r"\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", namespace
     ):
         raise ValueError("namespace must be '.' or dot-separated q identifiers")
+    if row_limit is not None and (
+        isinstance(row_limit, bool)
+        or not isinstance(row_limit, int)
+        or not 1 <= row_limit <= 10_000
+    ):
+        raise ValueError("row_limit must be between 1 and 10000")
+    receive_limit = _receive_limit(max_receive_bytes)
     groups = q_script_groups(script)
     while groups and not groups[-1].strip():
         groups.pop()
@@ -469,7 +493,7 @@ def q_script_query(script: str, namespace: str = ".") -> str:
         encoded_groups = "enlist " + _q_string(groups[0])
     else:
         encoded_groups = "(" + ";".join(_q_string(group) for group in groups) + ")"
-    return (
+    cell_query = (
         "{[ns;groups]\n"
         '  previous:string system "d";\n'
         '  system "d ",ns;\n'
@@ -483,6 +507,41 @@ def q_script_query(script: str, namespace: str = ".") -> str:
         "  if[not first outcome;'last outcome];\n"
         "  last outcome\n"
         f"}}[{_q_string(namespace)};{encoded_groups}]"
+    )
+    if row_limit is None:
+        return cell_query
+    # q's ``-8!`` includes the complete eight-byte IPC message header.
+    wire_limit = min(receive_limit, DIRECT_Q_MAX_WIRE_BYTES)
+    return (
+        "{[result;limit;wireLimit;cellLimit]\n"
+        "  kind:$[98h=type result;`table;"
+        "$[99h=type result;"
+        "$[98 98h~type each (key result;value result);`keyedTable;`value];"
+        "`value]];\n"
+        f"  if[`value=kind;:({_q_string(DIRECT_Q_ENVELOPE_MARKER)};"
+        "kind;0Nj;result)];\n"
+        "  total:count result;\n"
+        "  columnCount:count cols result;\n"
+        f"  if[{256}<columnCount;:({_q_string(DIRECT_Q_ENVELOPE_MARKER)};"
+        "`tableColumns;total;columnCount)];\n"
+        "  targetCount:limit&total;\n"
+        "  previewCount:targetCount&cellLimit div 1|columnCount;\n"
+        "  safeKind:$[`table=kind;`tableSafe;`keyedTableSafe];\n"
+        "  previewKind:$[previewCount<targetCount;safeKind;kind];\n"
+        "  preview:previewCount#result;\n"
+        f"  envelope:({_q_string(DIRECT_Q_ENVELOPE_MARKER)};"
+        "previewKind;total;preview);\n"
+        "  while[(wireLimit<count -8!envelope)&0<previewCount;\n"
+        "    previewCount:previewCount div 2;\n"
+        "    previewKind:safeKind;\n"
+        "    preview:previewCount#result;\n"
+        f"    envelope:({_q_string(DIRECT_Q_ENVELOPE_MARKER)};"
+        "previewKind;total;preview)];\n"
+        "  if[(wireLimit<count -8!envelope)|((0<total)&0=previewCount);"
+        f":({_q_string(DIRECT_Q_ENVELOPE_MARKER)};"
+        "`tableBytes;total;columnCount)];\n"
+        "  envelope\n"
+        f"}}[{cell_query};{row_limit};{wire_limit};{DIRECT_Q_MAX_PREVIEW_CELLS}]"
     )
 
 
@@ -632,7 +691,13 @@ class QConnection:
                 raise pending_error
             raise AssertionError("q IPC connection failed without an error")
 
-    def query(self, source: str, *, timeout: Optional[float] = None) -> QValue:
+    def query(
+        self,
+        source: str,
+        *,
+        timeout: Optional[float] = None,
+        _envelope_marker: Optional[bytes] = None,
+    ) -> QValue:
         """Issue one sync request. A timeout/interrupt closes the session."""
 
         with self._query_lock:
@@ -666,6 +731,7 @@ class QConnection:
                     max_receive_bytes=self.max_receive_bytes,
                     redactions=(self.username, self._password),
                     deadline=deadline,
+                    envelope_marker=_envelope_marker,
                 )
                 connection.settimeout(self.query_timeout)
                 return value
@@ -760,14 +826,45 @@ class _QReader:
         self.items = 0
         self._next_deadline_item = 0
 
-    def read_payload(self) -> QValue:
+    def read_payload(self, *, envelope_marker: Optional[bytes] = None) -> QValue:
         _check_deadline(self.deadline)
-        value = self.read_object(0)
+        value = (
+            self._read_enveloped_payload(envelope_marker)
+            if envelope_marker is not None
+            else self.read_object(0)
+        )
         if self.position != len(self.data):
             raise QIpcError(
                 f"invalid q IPC payload: {len(self.data) - self.position} trailing bytes"
             )
         return value
+
+    def _read_enveloped_payload(self, marker_bytes: bytes) -> QVector:
+        self._count(1)
+        q_type = self.i8()
+        if q_type == TYPE_ERROR:
+            message = self.error_symbol()
+            if self.position != len(self.data):
+                raise QIpcError("invalid q error payload: trailing bytes")
+            raise QError(message)
+        if q_type != 0 or self.u8() != 0 or self.i32() != 4:
+            raise QIpcError("invalid q IPC result envelope")
+        marker = self.read_object(1)
+        if not isinstance(marker, QCharVector) or marker.raw != marker_bytes:
+            raise QIpcError("invalid q IPC result envelope")
+        kind = self.read_object(1)
+        total = self.read_object(1)
+        try:
+            payload = self.read_object(1)
+        except UnsupportedQType as error:
+            payload = QText(
+                f"[unsupported q IPC type {error.q_type}; "
+                f"{len(self.data)} payload bytes omitted safely]",
+                truncated=True,
+                truncation_reasons=("sourcePreview",),
+            )
+            self.position = len(self.data)
+        return QVector(0, [marker, kind, total, payload])
 
     def read_object(self, depth: int) -> QValue:
         if depth > self.max_depth:

@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 No changes yet.
 
+## [0.1.1] - 2026-07-30
+
+### Fixed
+
+- Bounded Direct IPC keyed and unkeyed table previews inside q before
+  transport while retaining the true total row count, preventing large results
+  from exceeding IPC item or receive limits.
+
 ## [0.1.0] - 2026-07-27
 
 ### Added
@@ -30,5 +38,6 @@ No changes yet.
   that skip when q is unavailable.
 - Python-version CI and a release-only PyPI trusted-publishing workflow.
 
-[Unreleased]: https://github.com/dreth/kx-notebook/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/dreth/kx-notebook/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/dreth/kx-notebook/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/dreth/kx-notebook/releases/tag/v0.1.0

@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from kx_notebook.ipc import (
+    DIRECT_Q_ENVELOPE_MARKER,
     QCancelledError,
     QChar,
     QCharVector,
@@ -194,6 +195,32 @@ def test_complete_source_wrapper_ignores_ipython_trailing_blank_lines() -> None:
 
     assert '"([]x:1 2)"' in query
     assert ';""' not in query
+
+
+def test_bounded_complete_source_wrapper_composes_one_server_side_table_preview() -> None:
+    query = q_script_query(
+        "sideEffect+:1\n([]x:til 500000)",
+        ".analytics",
+        row_limit=3,
+        max_receive_bytes=4_096,
+    )
+
+    assert query.count('"sideEffect+:1"') == 1
+    assert query.count('"([]x:til 500000)"') == 1
+    assert DIRECT_Q_ENVELOPE_MARKER in query
+    assert "total:count result" in query
+    assert "preview:previewCount#result" in query
+    assert "`keyedTable" in query
+    # q's ``-8!`` includes the complete eight-byte IPC message header.
+    assert "4096" in query
+    assert 'system "d ",previous' in query
+    assert "if[not first outcome;'last outcome]" in query
+
+
+@pytest.mark.parametrize("row_limit", [0, True, 10_001])
+def test_bounded_complete_source_wrapper_validates_row_limit(row_limit: Any) -> None:
+    with pytest.raises(ValueError, match="row_limit"):
+        q_script_query("1+1", row_limit=row_limit)
 
 
 @pytest.mark.parametrize(

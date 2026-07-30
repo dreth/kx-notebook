@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from kx_notebook.contract import (
+    JS_SAFE_INTEGER,
     MIME_TYPE,
     EvaluationResult,
     QText,
@@ -16,18 +17,28 @@ from kx_notebook.evaluators import (
     CallbackEvaluator,
     DirectQEvaluator,
     EvaluationContext,
+    EvaluatorError,
     PyKXEvaluator,
 )
-from kx_notebook.ipc import QError, QTimeoutError
+from kx_notebook.ipc import QError, QIpcError, QTimeoutError
 
 from .qipc_fixtures import (
+    DIRECT_Q_ENVELOPE_MARKER,
     Exchange,
     ScriptedQServer,
+    q_bool,
+    q_dictionary,
+    q_direct_result,
     q_error,
     q_float_vector,
+    q_general_list,
     q_int,
+    q_int_vector,
+    q_keyed_table,
+    q_long,
     q_message,
     q_string,
+    q_symbol,
     q_symbol_vector,
     q_table,
 )
@@ -78,13 +89,14 @@ def test_evaluation_context_validates_limits_before_evaluation() -> None:
 
 
 def test_direct_evaluator_bounds_a_table_preview_and_retains_total_count() -> None:
-    table = q_table(
+    preview = q_table(
         {
-            "sym": q_symbol_vector(["AAPL", "MSFT", "IBM"]),
-            "price": q_float_vector([224.1, 518.0, 286.0]),
+            "sym": q_symbol_vector(["AAPL", "MSFT"]),
+            "price": q_float_vector([224.1, 518.0]),
         }
     )
-    with ScriptedQServer([Exchange(q_message(table))]) as server:
+    response = q_message(q_direct_result(preview, kind="table", row_count=60_000))
+    with ScriptedQServer([Exchange(response)]) as server:
         evaluator = DirectQEvaluator(server.host, server.port)
         result = evaluator.evaluate(
             "select from trade",
@@ -94,7 +106,8 @@ def test_direct_evaluator_bounds_a_table_preview_and_retains_total_count() -> No
 
     assert isinstance(result, EvaluationResult)
     assert list(result.columns or ()) == ["sym", "price"]
-    assert result.row_count == 3
+    assert result.row_count == 60_000
+    assert len(response) < 1_024
     output = build_mime_bundle(
         result.value,
         columns=result.columns,
@@ -103,14 +116,213 @@ def test_direct_evaluator_bounds_a_table_preview_and_retains_total_count() -> No
         byte_limit=100_000,
     )
     payload = output.bundle[MIME_TYPE]
-    assert payload["result"]["rowCount"] == 3
+    assert payload["result"]["rowCount"] == 60_000
     assert payload["result"]["previewRowCount"] == 2
     assert payload["result"]["truncated"] is True
     assert "select from trade" in server.sources[0]
+    assert DIRECT_Q_ENVELOPE_MARKER in server.sources[0]
+    assert "60000" not in server.sources[0]
+
+
+def test_direct_evaluator_bounds_keyed_table_transport_and_retains_total_count() -> None:
+    preview = q_keyed_table(
+        {"id": q_int_vector([0, 1, 2])},
+        {"price": q_float_vector([10.0, 11.0, 12.0])},
+    )
+    response = q_message(q_direct_result(preview, kind="keyedTable", row_count=500_000))
+    with ScriptedQServer([Exchange(response)]) as server:
+        evaluator = DirectQEvaluator(server.host, server.port)
+        result = evaluator.evaluate(
+            "([] id:til 500000)!([] price:500000#10f)",
+            EvaluationContext(row_limit=3, byte_limit=100_000),
+        )
+        evaluator.close()
+
+    assert result.columns == ["id", "price"]
+    assert result.row_count == 500_000
+    assert list(result.value) == [
+        {"id": 0, "price": 10.0},
+        {"id": 1, "price": 11.0},
+        {"id": 2, "price": 12.0},
+    ]
+    assert len(response) < 1_024
+
+
+@pytest.mark.parametrize(
+    ("kind", "column_count", "message"),
+    [
+        ("tableColumns", 257, "columns exceed"),
+        ("tableBytes", 40, "wire limit"),
+    ],
+)
+def test_direct_evaluator_handles_server_side_table_omission_envelopes(
+    kind: str,
+    column_count: int,
+    message: str,
+) -> None:
+    response = q_direct_result(q_long(column_count), kind=kind, row_count=500_000)
+    with ScriptedQServer([Exchange(q_message(response))]) as server:
+        evaluator = DirectQEvaluator(server.host, server.port)
+        result = evaluator.evaluate("largeTable[]")
+        evaluator.close()
+
+    assert isinstance(result.value, QText)
+    assert result.value.truncated is True
+    assert f"500000x{column_count}" in result.value.text
+    assert message in result.value.text
+    assert result.columns is None
+    assert result.row_count is None
+
+
+def test_direct_evaluator_accepts_a_strict_wire_capped_table_preview() -> None:
+    preview = q_table({"x": q_int_vector([0])})
+    response = q_direct_result(preview, kind="tableSafe", row_count=500_000)
+    with ScriptedQServer([Exchange(q_message(response))]) as server:
+        evaluator = DirectQEvaluator(server.host, server.port)
+        result = evaluator.evaluate(
+            "largeTable[]",
+            EvaluationContext(row_limit=10_000, byte_limit=100_000),
+        )
+        evaluator.close()
+
+    assert result.row_count == 500_000
+    assert result.columns == ["x"]
+    assert list(result.value) == [{"x": 0}]
+
+
+def test_direct_evaluator_envelope_cannot_collide_with_user_dictionary_data() -> None:
+    collision = q_dictionary(
+        q_symbol_vector(["marker", "kind", "rowCount", "value"]),
+        q_general_list(
+            [
+                q_string(DIRECT_Q_ENVELOPE_MARKER),
+                q_symbol("table"),
+                q_int(999),
+                q_table({"x": q_int_vector([1])}),
+            ]
+        ),
+    )
+    response = q_message(q_direct_result(collision, kind="value"))
+    with ScriptedQServer([Exchange(response)]) as server:
+        evaluator = DirectQEvaluator(server.host, server.port)
+        result = evaluator.evaluate(
+            '`marker`kind`rowCount`value!( "kx-notebook/direct-q/v1";`table;999;([]x:enlist 1))'
+        )
+        evaluator.close()
+
+    assert result.row_count is None
+    assert result.columns is None
+    assert isinstance(result.value, QText)
+    assert DIRECT_Q_ENVELOPE_MARKER in result.value.text
+    assert "marker" in result.value.text
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        q_int(42),
+        q_general_list(
+            [
+                q_string(DIRECT_Q_ENVELOPE_MARKER),
+                q_symbol("value"),
+                q_long(-9_223_372_036_854_775_808),
+            ]
+        ),
+        q_direct_result(q_int(42), kind="table", row_count=1),
+        q_direct_result(q_table({"x": q_int_vector([1])}), kind="value"),
+        q_direct_result(q_table({"x": q_int_vector([1])}), kind="keyedTable", row_count=1),
+        q_direct_result(q_table({"x": q_int_vector([1])}), kind="unknown", row_count=1),
+        q_direct_result(q_table({"x": q_int_vector([1, 2])}), kind="table", row_count=1),
+        q_direct_result(q_table({"x": q_int_vector([1])}), kind="table", row_count=2),
+        q_general_list(
+            [
+                q_string("wrong-marker"),
+                q_symbol("value"),
+                q_long(-9_223_372_036_854_775_808),
+                q_int(42),
+            ]
+        ),
+        q_general_list(
+            [
+                q_symbol(DIRECT_Q_ENVELOPE_MARKER),
+                q_symbol("value"),
+                q_long(-9_223_372_036_854_775_808),
+                q_int(42),
+            ]
+        ),
+        q_general_list(
+            [
+                q_string(DIRECT_Q_ENVELOPE_MARKER),
+                q_string("value"),
+                q_long(-9_223_372_036_854_775_808),
+                q_int(42),
+            ]
+        ),
+        q_general_list(
+            [
+                q_string(DIRECT_Q_ENVELOPE_MARKER),
+                q_symbol("value"),
+                q_int(0),
+                q_int(42),
+            ]
+        ),
+        q_general_list(
+            [
+                q_string(DIRECT_Q_ENVELOPE_MARKER),
+                q_symbol("table"),
+                q_bool(True),
+                q_table({"x": q_int_vector([1])}),
+            ]
+        ),
+        q_direct_result(q_table({"x": q_int_vector([1])}), kind="table", row_count=-1),
+        q_direct_result(
+            q_table({"x": q_int_vector([1])}),
+            kind="table",
+            row_count=JS_SAFE_INTEGER + 1,
+        ),
+        q_direct_result(
+            q_table({"x": q_int_vector(list(range(21)))}),
+            kind="table",
+            row_count=21,
+        ),
+    ],
+)
+def test_direct_evaluator_rejects_malformed_internal_envelopes(payload: bytes) -> None:
+    with ScriptedQServer([Exchange(q_message(payload))]) as server:
+        evaluator = DirectQEvaluator(server.host, server.port)
+        with pytest.raises((EvaluatorError, QIpcError), match="envelope"):
+            evaluator.evaluate("42")
+        evaluator.close()
+
+
+def test_malformed_envelope_does_not_retain_password_in_traceback_locals() -> None:
+    secret = "malformed-envelope-secret"
+    payload = q_general_list(
+        [
+            q_string(DIRECT_Q_ENVELOPE_MARKER),
+            q_symbol("table"),
+            q_long(1),
+            q_string(secret),
+        ]
+    )
+    with ScriptedQServer([Exchange(q_message(payload))]) as server:
+        evaluator = DirectQEvaluator(server.host, server.port, password=secret)
+        with pytest.raises(EvaluatorError, match="envelope") as captured:
+            evaluator.evaluate("42")
+        evaluator.close()
+
+    traceback = captured.value.__traceback__
+    while traceback is not None:
+        filename = traceback.tb_frame.f_code.co_filename
+        if "/src/kx_notebook/" in filename:
+            assert secret not in repr(traceback.tb_frame.f_locals)
+        traceback = traceback.tb_next
+    assert captured.value.__context__ is None
 
 
 def test_direct_evaluator_normalizes_scalar_for_portable_display() -> None:
-    with ScriptedQServer([Exchange(q_message(q_int(42)))]) as server:
+    response = q_direct_result(q_int(42), kind="value")
+    with ScriptedQServer([Exchange(q_message(response))]) as server:
         evaluator = DirectQEvaluator(server.host, server.port)
         result = evaluator.evaluate("6*7")
         evaluator.close()
@@ -120,10 +332,23 @@ def test_direct_evaluator_normalizes_scalar_for_portable_display() -> None:
     assert "42" in result.value.text
 
 
+def test_direct_evaluator_preserves_opaque_non_table_fallback_inside_envelope() -> None:
+    response = q_direct_result(bytes((20,)), kind="value")
+    with ScriptedQServer([Exchange(q_message(response))]) as server:
+        evaluator = DirectQEvaluator(server.host, server.port)
+        result = evaluator.evaluate("opaque[]")
+        evaluator.close()
+
+    assert isinstance(result.value, QText)
+    assert result.value.truncated is True
+    assert "unsupported q IPC type 20" in result.value.text
+
+
 def test_direct_evaluator_redacts_a_password_spanning_a_char_table_column() -> None:
     secret = "table-secret"
     table = q_table({"c": q_string(secret)})
-    with ScriptedQServer([Exchange(q_message(table))]) as server:
+    response = q_direct_result(table, kind="table", row_count=len(secret))
+    with ScriptedQServer([Exchange(q_message(response))]) as server:
         evaluator = DirectQEvaluator(server.host, server.port, password=secret)
         result = evaluator.evaluate('([]c:"table-secret")')
         evaluator.close()
@@ -151,7 +376,8 @@ def test_direct_evaluator_preserves_columns_that_collide_after_redaction() -> No
             "█": q_string("b"),
         }
     )
-    with ScriptedQServer([Exchange(q_message(table))]) as server:
+    response = q_direct_result(table, kind="table", row_count=1)
+    with ScriptedQServer([Exchange(q_message(response))]) as server:
         evaluator = DirectQEvaluator(server.host, server.port, password=secret)
         result = evaluator.evaluate("table[]")
         evaluator.close()
@@ -171,7 +397,8 @@ def test_direct_evaluator_preserves_columns_that_collide_after_redaction() -> No
 def test_direct_evaluator_downgrades_overlong_column_names_safely() -> None:
     long_name = "x" * 257
     table = q_table({long_name: q_string("a")})
-    with ScriptedQServer([Exchange(q_message(table))]) as server:
+    response = q_direct_result(table, kind="table", row_count=1)
+    with ScriptedQServer([Exchange(q_message(response))]) as server:
         evaluator = DirectQEvaluator(server.host, server.port)
         result = evaluator.evaluate("table[]")
         evaluator.close()
