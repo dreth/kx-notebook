@@ -9,7 +9,7 @@ contract already consumed by
 has escaped `text/html` and `text/plain` fallbacks, so saved notebooks remain
 readable without a custom renderer.
 
-This is the source for version 0.1.1. The installation below intentionally uses
+This is the source for version 0.1.2. The installation below intentionally uses
 a source checkout; do not assume PyPI availability until a release is
 published.
 

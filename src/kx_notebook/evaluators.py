@@ -615,9 +615,6 @@ def _parse_direct_q_result(value: Any, row_limit: int) -> _DirectQResult:
         expected_type = QKeyedTable
     else:
         raise EvaluatorError("invalid Direct q result envelope")
-    if isinstance(payload, QText):
-        _direct_q_total(total)
-        return _DirectQResult(payload, None)
     if type(payload) is not expected_type:
         raise EvaluatorError("invalid Direct q result envelope")
     checked_total = _direct_q_total(total)

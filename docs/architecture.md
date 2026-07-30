@@ -91,8 +91,9 @@ preview count, row limit, and internal cell budget are validated before
 redaction or display. The q wrapper also measures its serialized table envelope
 and shrinks it below both the configured receive limit and an item-safe internal
 wire budget. Over-wide schemas or previews that cannot fit even one row become
-explicit bounded omissions. The decoder retains its established opaque-value
-fallback inside an otherwise valid envelope.
+explicit bounded omissions. Unsupported payload types inside the private
+envelope fail closed; the decoder never skips unparsed bytes or bypasses
+trailing-byte validation.
 
 Native q errors occur before envelope construction and retain the existing
 restore-and-rethrow behavior. Assignments and other state changes therefore

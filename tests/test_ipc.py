@@ -41,6 +41,7 @@ from .qipc_fixtures import (
     q_date,
     q_datetime,
     q_dictionary,
+    q_direct_result,
     q_error,
     q_float,
     q_float_vector,
@@ -334,6 +335,37 @@ def test_malformed_compression_cannot_copy_header_or_hide_trailing_bytes() -> No
     impossible = bytes((1, 2, 1, 0)) + struct.pack("<i", 12) + struct.pack("<i", 64 * 1024 * 1024)
     with pytest.raises(QIpcError, match="expansion|wire"):
         deserialize_message(impossible)
+
+
+@pytest.mark.parametrize("kind", ["value", "table"])
+@pytest.mark.parametrize("compressed", [False, True])
+def test_direct_envelope_rejects_unsupported_payload_and_trailing_bytes(
+    kind: str,
+    compressed: bool,
+) -> None:
+    payload = q_direct_result(
+        bytes((20,)) + b"unvalidated-trailing-bytes",
+        kind=kind,
+        row_count=None if kind == "value" else 1,
+    )
+    if compressed:
+        literal_body = b"".join(
+            bytes((0,)) + payload[offset : offset + 8] for offset in range(0, len(payload), 8)
+        )
+        message = (
+            bytes((1, 2, 1, 0))
+            + struct.pack("<i", 12 + len(literal_body))
+            + struct.pack("<i", 8 + len(payload))
+            + literal_body
+        )
+    else:
+        message = q_message(payload)
+
+    with pytest.raises(QIpcError, match="envelope"):
+        deserialize_message(
+            message,
+            envelope_marker=DIRECT_Q_ENVELOPE_MARKER.encode("ascii"),
+        )
 
 
 def test_malformed_attributes_headers_atoms_and_error_tails_fail_closed() -> None:

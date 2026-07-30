@@ -854,16 +854,7 @@ class _QReader:
             raise QIpcError("invalid q IPC result envelope")
         kind = self.read_object(1)
         total = self.read_object(1)
-        try:
-            payload = self.read_object(1)
-        except UnsupportedQType as error:
-            payload = QText(
-                f"[unsupported q IPC type {error.q_type}; "
-                f"{len(self.data)} payload bytes omitted safely]",
-                truncated=True,
-                truncation_reasons=("sourcePreview",),
-            )
-            self.position = len(self.data)
+        payload = self.read_object(1)
         return QVector(0, [marker, kind, total, payload])
 
     def read_object(self, depth: int) -> QValue:

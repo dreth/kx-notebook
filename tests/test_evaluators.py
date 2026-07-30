@@ -332,16 +332,13 @@ def test_direct_evaluator_normalizes_scalar_for_portable_display() -> None:
     assert "42" in result.value.text
 
 
-def test_direct_evaluator_preserves_opaque_non_table_fallback_inside_envelope() -> None:
+def test_direct_evaluator_rejects_opaque_non_table_payload_inside_envelope() -> None:
     response = q_direct_result(bytes((20,)), kind="value")
     with ScriptedQServer([Exchange(q_message(response))]) as server:
         evaluator = DirectQEvaluator(server.host, server.port)
-        result = evaluator.evaluate("opaque[]")
+        with pytest.raises(QIpcError, match="envelope"):
+            evaluator.evaluate("opaque[]")
         evaluator.close()
-
-    assert isinstance(result.value, QText)
-    assert result.value.truncated is True
-    assert "unsupported q IPC type 20" in result.value.text
 
 
 def test_direct_evaluator_redacts_a_password_spanning_a_char_table_column() -> None:
