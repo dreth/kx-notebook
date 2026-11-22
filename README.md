@@ -9,14 +9,24 @@ contract already consumed by
 has escaped `text/html` and `text/plain` fallbacks, so saved notebooks remain
 readable without a custom renderer.
 
-This is the source for version 0.1.3. The installation below intentionally uses
-a source checkout; do not assume PyPI availability until a release is
-published.
+This is the source for version 0.1.3, which is also published on
+[PyPI](https://pypi.org/project/kx-notebook/).
 
-## Install from a checkout
+## Install
 
 Python 3.9 through 3.13 is supported. Install into the same environment as the
 IPython or Jupyter kernel that will run q cells:
+
+```sh
+uv pip install kx-notebook
+# or
+python -m pip install kx-notebook
+```
+
+PyKX and keyring integrations are opt-in: `kx-notebook[pykx]`,
+`kx-notebook[keyring]`.
+
+To install from a checkout instead:
 
 ```sh
 git clone https://github.com/dreth/kx-notebook.git
@@ -30,7 +40,7 @@ uv pip install .
 python -m pip install .
 ```
 
-PyKX and keyring integrations are opt-in:
+From a checkout, add the extras with:
 
 ```sh
 uv pip install '.[pykx]'
@@ -122,7 +132,7 @@ The connection timeout remains `5.0` seconds. Profile, Python API, `%kx`, and
 `%%q` timeout values are always seconds, and explicit values override these
 defaults. Callback and PyKX execution remain owned by their respective callers.
 
-TLS transport is not implemented in 0.1.0. Use a trusted local/private network
+TLS transport is not implemented in 0.1.3. Use a trusted local/private network
 or a separately managed secure tunnel; do not expose an unauthenticated q port
 to an untrusted network.
 
@@ -160,7 +170,7 @@ max_receive_bytes = 67108864
 ```
 
 `username`, `password_env`, and timeout fields are optional. `kind` must match
-an implemented evaluator; TLS fields are rejected because 0.1.0 does not
+an implemented evaluator; TLS fields are rejected because 0.1.3 does not
 implement TLS. `max_receive_bytes` may lower the direct decoder cap; 64 MiB is
 the package maximum.
 
@@ -195,7 +205,7 @@ available:
 - **Local broker HTTP:** supply the broker URL and bearer token at runtime. The
   adapter defines an authenticated request/response boundary for future
   `vscode-kdb` integration; it does not discover a broker or persist its token.
-  Version 0.1.0 accepts loopback broker URLs only and rejects redirects and
+  Version 0.1.3 accepts loopback broker URLs only and rejects redirects and
   ambient HTTP proxies.
 
 Configure an application-owned callback directly:
@@ -298,7 +308,7 @@ Install the package into the environment backing the selected kernel, then use
 `%load_ext kx_notebook`. Installing only the console command in another virtual
 environment will not make the extension importable by that kernel.
 
-No repository-specific Dev Container is shipped in 0.1.0. In an existing Dev
+No repository-specific Dev Container is shipped in 0.1.3. In an existing Dev
 Container, install Python 3.9–3.13 plus `uv`, run
 `uv sync --all-extras --group dev --locked`,
 and ensure the container can reach the intended q host. Keep credentials in the
